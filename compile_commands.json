@@ -1,0 +1,6 @@
+[
+{
+  "directory": "/home/present/dev/xlog",
+  "arguments": ["clang++", "-c", "-Qunused-arguments", "-m64", "-std=c++26", "-I", "/home/present/.xmake/packages/z/zstd/v1.5.6/80e2da1ba1084d6a873eadb0acb6c455/include", "-o", "build/.objs/main/linux/x86_64/release/main.cpp.o", "main.cpp"],
+  "file": "main.cpp"
+}]
