@@ -6,7 +6,6 @@ target("main")
     set_languages("c++26")
     set_kind("binary")
     add_files("main.cpp","micro-ecc/uECC.c")
-    -- add_files("decode_log_file.c","micro-ecc/uECC.c")
 
 --
 -- If you want to known more usage about xmake, please see https://xmake.io
