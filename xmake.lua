@@ -1,4 +1,5 @@
 add_requires("zstd","zlib")
+add_rules("mode.debug","mode.release")
 target("main")
     add_packages("zstd","zlib")
     set_toolset("cxx", "clang++")
@@ -6,6 +7,7 @@ target("main")
     set_languages("c++26")
     set_kind("binary")
     add_files("main.cpp","micro-ecc/uECC.c")
+    -- add_files("_main.cpp","micro-ecc/uECC.c")
 
 --
 -- If you want to known more usage about xmake, please see https://xmake.io

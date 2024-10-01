@@ -6,3 +6,10 @@ build/
 .DS_Store
 
 
+xlog_v
+decode_log_file.c
+.cache/clangd/index
+.vscode
+VRLOG_20240918_0.xlog
+VRLOG_20240918_0.xlog.log
+_main.cpp

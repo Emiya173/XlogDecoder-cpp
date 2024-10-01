@@ -7,6 +7,7 @@
 #include <dirent.h>
 #include <format>
 #include <optional>
+#include <print>
 #include <span>
 #include <string>
 #include <string_view>
@@ -54,7 +55,7 @@ const int TEA_BLOCK_LEN = 8;
 
 vector<uint8_t> Hex2Buffer(string_view str) {
   size_t len = str.size();
-  if (len % 2)
+  if (!len || len % 2)
     return {};
 
   vector<uint8_t> buffer(len / 2);
@@ -63,6 +64,7 @@ vector<uint8_t> Hex2Buffer(string_view str) {
     auto [ptr, ec] = from_chars(pos, pos + 2, v, 16);
     if (ec != std::errc())
       return {};
+    pos = ptr;
   }
 
   return buffer;
@@ -144,7 +146,7 @@ bool isGoodLogBuffer(BufferView buffer, size_t offset, int count) {
   return true;
 }
 
-optional<size_t> getLogStartPos(BufferView buffer, int count) {
+optional<int64_t> getLogStartPos(BufferView buffer, int count) {
   size_t offset{};
   while (1) {
     if (offset >= buffer.size()) {
@@ -161,7 +163,7 @@ optional<size_t> getLogStartPos(BufferView buffer, int count) {
   return {};
 }
 
-void appendBuffer(Buffer outBuffer, BufferView buffer) {
+void appendBuffer(Buffer &outBuffer, BufferView buffer) {
 #ifdef __cpp_lib_containers_ranges
   outBuffer.append_range(buffer);
 #else
@@ -255,7 +257,8 @@ optional<Buffer> zlibDecompress(BufferView compressedBuffer) {
   return uncomp;
 }
 
-optional<int> decodeBuffer(BufferView buffer, size_t offset, auto outBuffer) {
+optional<int64_t> decodeBuffer(BufferView buffer, size_t offset,
+                               Buffer &outBuffer) {
   if (offset >= buffer.size()) {
     return {};
   }
@@ -288,7 +291,7 @@ optional<int> decodeBuffer(BufferView buffer, size_t offset, auto outBuffer) {
   if (COMPRESS_CRYPT_START == buffer[offset] || CRYPT_START == buffer[offset]) {
     key = BASE_KEY ^ (0xff & length) ^ buffer[offset];
   } else {
-    unsigned short seq;
+    uint16_t seq;
     memcpy(&seq, &buffer[offset + headerLen - cryptKeyLen - 4 - 2 - 2], 2);
 
     key = BASE_KEY ^ (0xff & seq) ^ buffer[offset];
@@ -346,6 +349,7 @@ optional<int> decodeBuffer(BufferView buffer, size_t offset, auto outBuffer) {
              SYNC_ZSTD_START == buffer[offset] ||
              SYNC_NO_CRYPT_ZSTD_START == buffer[offset]) {
     memcpy(tmpBuffer.data(), &buffer[offset + headerLen], length);
+    decompBuffer = tmpBuffer;
   } else if (ASYNC_ZLIB_START == buffer[offset] ||
              ASYNC_ZSTD_START == buffer[offset]) {
     memcpy(tmpBuffer.data(), &buffer[offset + headerLen], length);
@@ -434,13 +438,14 @@ void parseFile(const char *path, const char *outPath) {
   }
   fclose(file);
 
-  size_t startPos = getLogStartPos(span(buffer, bufferSize), 2).value_or(-1);
+  int64_t startPos = getLogStartPos(span(buffer, bufferSize), 2).value_or(-1);
   if (-1 == startPos) {
     return;
   }
 
   size_t outBufferSize = bufferSize * 6;
-  auto outBuffer = Buffer(outBufferSize);
+  Buffer outBuffer;
+  outBuffer.reserve(outBufferSize);
   // char *outBuffer = (char *)realloc(NULL, outBufferSize);
   while (1) {
     startPos = decodeBuffer(span(buffer, bufferSize), startPos, outBuffer)
