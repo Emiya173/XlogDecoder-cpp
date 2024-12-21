@@ -6,7 +6,8 @@ target("main")
     set_toolset("ld", "clang++")
     set_languages("c++26")
     set_kind("binary")
-    add_files("main.cpp","micro-ecc/uECC.c")
+    add_includedirs("src/include")
+    add_files("src/main.cpp","micro-ecc/uECC.c")
     -- add_files("_main.cpp","micro-ecc/uECC.c")
 
 --
