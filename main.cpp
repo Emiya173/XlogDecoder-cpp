@@ -4,17 +4,16 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
-#include <dirent.h>
+#include <filesystem>
 #include <format>
+#include <fstream>
+#include <memory>
 #include <optional>
 #include <print>
 #include <span>
 #include <string>
 #include <string_view>
-#include <sys/stat.h>
-#include <sys/types.h>
 #include <system_error>
-#include <unistd.h>
 #include <vector>
 
 #include "micro-ecc/uECC.h"
@@ -24,6 +23,8 @@ using namespace std;
 
 using Buffer = vector<char>;
 using BufferView = span<char>;
+namespace fs = std::filesystem;
+
 enum MAGIC {
   END = 0x00,
   CRYPT_START,
@@ -353,8 +354,8 @@ optional<int64_t> decodeBuffer(BufferView buffer, size_t offset,
   } else if (ASYNC_ZLIB_START == buffer[offset] ||
              ASYNC_ZSTD_START == buffer[offset]) {
     memcpy(tmpBuffer.data(), &buffer[offset + headerLen], length);
-    uint8_t clientPubKey[cryptKeyLen];
-    memcpy(clientPubKey, &buffer[offset + headerLen - cryptKeyLen],
+    unique_ptr<uint8_t[]> clientPubKey = make_unique<uint8_t[]>(cryptKeyLen);
+    memcpy(clientPubKey.get(), &buffer[offset + headerLen - cryptKeyLen],
            cryptKeyLen);
 
     auto svrPriKey = Hex2Buffer(PRIV_KEY);
@@ -364,7 +365,7 @@ optional<int64_t> decodeBuffer(BufferView buffer, size_t offset,
     }
 
     uint8_t ecdhKey[32] = {0};
-    if (0 == uECC_shared_secret(clientPubKey, svrPriKey.data(), ecdhKey,
+    if (0 == uECC_shared_secret(clientPubKey.get(), svrPriKey.data(), ecdhKey,
                                 uECC_secp256k1())) {
       fputs("Get ECDH key error\n", stderr);
       return offset + headerLen + length + 1;
@@ -408,37 +409,27 @@ optional<int64_t> decodeBuffer(BufferView buffer, size_t offset,
   return offset + headerLen + length + 1;
 }
 
-void parseFile(const char *path, const char *outPath) {
-  FILE *file;
-  // Buffer buffer;
-  size_t bufferSize{};
-  char *buffer;
-  size_t result;
-
-  file = fopen(path, "rb");
-  if (file == NULL) {
+void parseFile(const fs::path &path, const fs::path &outPath) {
+  std::ifstream file(path, std::ios::binary);
+  if (!file) {
     fputs("File error", stderr);
     exit(1);
   }
 
-  fseek(file, 0, SEEK_END);
-  bufferSize = (size_t)ftell(file);
-  rewind(file);
+  // 获取文件大小
+  file.seekg(0, std::ios::end);
+  size_t bufferSize = file.tellg();
+  file.seekg(0, std::ios::beg);
 
-  buffer = (char *)malloc(sizeof(char) * bufferSize);
-  if (buffer == NULL) {
-    fputs("Memory error", stderr);
-    exit(2);
-  }
-
-  result = fread(buffer, 1, bufferSize, file);
-  if (result != bufferSize) {
+  // 读取文件内容
+  std::vector<char> buffer(bufferSize);
+  if (!file.read(buffer.data(), bufferSize)) {
     fputs("Reading error", stderr);
     exit(3);
   }
-  fclose(file);
+  file.close();
 
-  int64_t startPos = getLogStartPos(span(buffer, bufferSize), 2).value_or(-1);
+  int64_t startPos = getLogStartPos(buffer, 2).value_or(-1);
   if (-1 == startPos) {
     return;
   }
@@ -446,62 +437,57 @@ void parseFile(const char *path, const char *outPath) {
   size_t outBufferSize = bufferSize * 6;
   Buffer outBuffer;
   outBuffer.reserve(outBufferSize);
-  // char *outBuffer = (char *)realloc(NULL, outBufferSize);
+
   while (1) {
-    startPos = decodeBuffer(span(buffer, bufferSize), startPos, outBuffer)
-                   .value_or(-1);
+    startPos = decodeBuffer(buffer, startPos, outBuffer).value_or(-1);
     if (-1 == startPos) {
       break;
     }
   }
 
-  FILE *outFile = fopen(outPath, "wb");
-  fwrite(outBuffer.data(), sizeof(char), outBuffer.size(), outFile);
-  fclose(outFile);
+  // 写入输出文件
+  std::ofstream outFile(outPath, std::ios::binary);
+  if (!outFile.write(outBuffer.data(), outBuffer.size())) {
+    fputs("Writing error", stderr);
+    exit(4);
+  }
 }
 
-void parseDir(const char *path) {
-  DIR *dir;
-  struct dirent *ent;
-  if ((dir = opendir(path)) != NULL) {
-    while ((ent = readdir(dir)) != NULL) {
-      if (strlen(ent->d_name) > 5 &&
-          strcmp(ent->d_name + strlen(ent->d_name) - 5, ".xlog") == 0) {
-        char inPath[260] = {0};
-        char outPath[260] = {0};
-        snprintf(inPath, sizeof(inPath), "%s/%s", path, ent->d_name);
-        snprintf(outPath, sizeof(outPath), "%s/%s.log", path, ent->d_name);
-        lastseq = 0;
-        parseFile(inPath, outPath);
+void parseDir(const fs::path &path) {
+  try {
+    for (const auto &entry : fs::directory_iterator(path)) {
+      if (entry.is_regular_file()) {
+        std::string filename = entry.path().filename().string();
+        if (filename.size() > 5 && filename.ends_with(".xlog")) {
+          auto outPath = entry.path();
+          outPath.replace_extension(".xlog.log");
+          lastseq = 0;
+          parseFile(entry.path(), outPath);
+        }
       }
     }
-    closedir(dir);
-  } else {
-    fputs("opendir failed", stderr);
+  } catch (const fs::filesystem_error &e) {
+    fputs("Directory iteration error", stderr);
     exit(1);
   }
 }
 
 int main(int argc, char *argv[]) {
   if (argc == 2) {
-    char *path = argv[1];
-    struct stat path_stat;
-    stat(path, &path_stat);
+    fs::path path = argv[1];
 
-    if (S_ISREG(path_stat.st_mode)) {
-      char outPath[260] = {0};
-      snprintf(outPath, sizeof(outPath), "%s.log", path);
+    if (fs::is_regular_file(path)) {
+      auto outPath = path;
+      outPath.replace_extension(path.extension().string() + ".log");
       parseFile(path, outPath);
-    } else if (S_ISDIR(path_stat.st_mode)) {
+    } else if (fs::is_directory(path)) {
       parseDir(path);
     } else {
-      fputs("openfile failed", stderr);
+      fputs("Invalid path", stderr);
       return 1;
     }
   } else if (argc == 3) {
-    char *inPath = argv[1];
-    char *outPath = argv[2];
-    parseFile(inPath, outPath);
+    parseFile(argv[1], argv[2]);
   } else {
     parseDir(".");
   }
