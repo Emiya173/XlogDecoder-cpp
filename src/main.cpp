@@ -292,7 +292,7 @@ void parseFile(const fs::path &path, const fs::path &outPath) {
   }
 
   // 写入输出文件
-  std::ofstream outFile(outPath, std::ios::binary);
+  std::ofstream outFile(outPath, std::ios::out);
   if (!outFile.write(outBuffer.data(), outBuffer.size())) {
     fputs("Writing error", stderr);
     exit(4);
